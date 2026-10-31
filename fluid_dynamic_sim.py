@@ -27,7 +27,9 @@ CONFIG = SimulationConfig()
 # ==============================================================================
 class fluidGrid:
     """
-    
+    Initializes the boundary velocities. self.velocities are 2d arrays that are
+    n-number of cells in rows and columns + 1 to assign a velocity at every
+    edge.
     """
     def __init__(self, cell_count_x, cell_count_y, cell_size):
         self.cell_count_x = int(CONFIG.CELL_COUNT_X)
@@ -39,24 +41,31 @@ class fluidGrid:
 
     def randomize_velocities(self):
         """
-        
+        Takes the initial arrays of boundary velocities and assigns a random
+        value 0.00 <= vel <= 1.00
         """
+        for i, row in enumerate(self.velocities_x):
+            for j, element in enumerate(row):
+                self.velocities_x[i][j] = round(random.uniform(0.0, 1.0), 2)
+
+        return self.velocities_x
 
     def calculate_cell_velocity_divergence(self, cell_x, cell_y):
         """
-        
+        Calculate the divergence of the velocity for a given cell identified by
+        interger coordinates (cell_x, cell_y)
         """
-        # get velocities at each edge of cell
+        # Get velocities at each edge of cell
         velocity_R = self.velocities_x[cell_x + 1, cell_y + 0]
         velocity_L = self.velocities_x[cell_x + 0, cell_y + 0]
         velocity_T = self.velocities_y[cell_x + 0, cell_y + 1]
         velocity_B = self.velocities_y[cell_x + 0, cell_y + 0]
 
-        # calculate how fast the fluid's velocity is changing across this cell
+        # Calculate how fast the fluid's velocity is changing across this cell
         # on either axies
         gradient_x = (velocity_R - velocity_L) / self.cell_size
         gradient_y = (velocity_T - velocity_B) / self.cell_size
-        # sum to calculate if more fluid is entering (div < 0) or exiting the
+        # Sum to calculate if more fluid is entering (div < 0) or exiting the
         # cell (div > 0)
         divergence = gradient_x + gradient_y
         return divergence
@@ -65,7 +74,7 @@ class fluidGrid:
 # THE MAIN SIMULATION ENGINE
 # ==============================================================================
 class Simulation:
-    """Accepts the dataclass and handles execution logic and math operations."""
+    """Execution of main loop logic, math operations and rendering."""
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((CONFIG.SCREEN_SIZE_X, CONFIG.SCREEN_SIZE_Y))
@@ -73,11 +82,17 @@ class Simulation:
         self.clock = pygame.time.Clock()
         self.running = True
 
-        # HERE IS THE HANDOFF: Save the dataclass container inside the engine
+        # Initiate the fluid grid of cells and velocites
         self.state = fluidGrid(3, 2, 100)
+        
+        # Test printing of values
+        self.state.randomize_velocities()
         print(self.state.velocities_x)
-        print("\n")
-        print(self.state.velocities_y)
+
+        for i in range(len(self.state.velocities_x)):
+            for j in range(len(self.state.velocities_y)):
+                a = self.state.calculate_cell_velocity_divergence(i-1, j-1)
+                print(round(a, 4))
 
     def handle_events(self):
         for event in pygame.event.get():
