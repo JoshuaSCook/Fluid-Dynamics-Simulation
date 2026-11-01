@@ -17,9 +17,9 @@ class SimulationConfig:
     GREEN: tuple = (0, 255, 0)
     BLUE: tuple = (0, 0, 255)
 
-    CELL_COUNT_X: int = 20
-    CELL_COUNT_Y: int = 16
-    CELL_SIZE: float = 40.0
+    CELL_COUNT_X: int = 6
+    CELL_COUNT_Y: int = 4
+    CELL_SIZE: float = 100.0
 
     SCREEN_SIZE_X: int = (CELL_COUNT_X + 2) * CELL_SIZE
     SCREEN_SIZE_Y: int = (CELL_COUNT_Y + 2) * CELL_SIZE
@@ -52,11 +52,11 @@ class fluidGrid:
 
     def randomize_velocities(self, velocity):
         """ Takes the initial arrays of boundary velocities and assigns a random
-        value 0.00 <= vel <= 1.00.
+        value -1.00 <= vel <= 1.00.
         """
         for x, row in enumerate(velocity):
             for y, element in enumerate(row):
-                velocity[x][y] = round(random.uniform(0.0, 1.0), 2)
+                velocity[x][y] = round(random.uniform(-1.0, 1.0), 2)
 
         return velocity
 
@@ -212,7 +212,7 @@ class Simulation:
         """  """
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
-        self.state.update_pressures(12)
+        self.state.update_pressures(12) # Higher number --> more accurate. => 8
         self.state.update_velocities()
 
     # RENDERING
@@ -221,8 +221,8 @@ class Simulation:
         """ RENDERED OBJECTS:
             1. Cells
             2. Divergence text
-            3. x-velocity buttons
-            4. y-velocity buttons
+            3. x-velocity vectors
+            4. y-velocity vectors
             """
         self.screen.fill(CONFIG.BLACK)
 
@@ -232,7 +232,14 @@ class Simulation:
                 pygame.draw.rect(
                     self.screen,
                     self.state.cell_divergence_color[x][y],
-                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE)
+                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
+                )
+                # Draws the white border
+                pygame.draw.rect(
+                    self.screen,
+                    CONFIG.WHITE,
+                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
+                    width=1,
                 )
 
         # 2. Render divergence text
@@ -240,25 +247,27 @@ class Simulation:
                 # Blit the text surface onto the screen
                 self.screen.blit(text_surface, (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE) + 10, CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE) + 10))
 
-        # # 3. Render the x-velocity buttons
-        # for x in range(CONFIG.CELL_COUNT_X + 1):
-        #     for y in range(CONFIG.CELL_COUNT_Y):
-        #         pygame.draw.circle(
-        #             self.screen,
-        #             CONFIG.WHITE,
-        #             (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), 1.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
-        #             6
-        #         )
+        # 3. Render the x-velocity vectors
+        for x, row in enumerate(self.state.velocities_x):
+            for y, element in enumerate(row):
+                pygame.draw.line(
+                    self.screen,
+                    CONFIG.GREEN,
+                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), 1.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE) + (40 * self.state.velocities_x[x][y]), 1.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+                    3
+                )
 
-        # # 4. render the y-velocity buttons
-        # for x in range(CONFIG.CELL_COUNT_X):
-        #     for y in range(CONFIG.CELL_COUNT_Y + 1):
-        #         pygame.draw.circle(
-        #             self.screen,
-        #             CONFIG.GREEN,
-        #             (1.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
-        #             6
-        #         )
+        # 4. render the y-velocity vectors
+        for x, row in enumerate(self.state.velocities_y):
+            for y, element in enumerate(row):
+                pygame.draw.line(
+                    self.screen,
+                    CONFIG.GREEN,
+                    (1.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+                    (1.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE) + (40 * self.state.velocities_y[x][y])),
+                    3
+                )
 
         # Updates the screen with all render changes
         pygame.display.update()
