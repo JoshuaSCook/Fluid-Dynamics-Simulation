@@ -4,7 +4,6 @@ import pygame
 from dataclasses import dataclass
 import random
 
-
 # ==============================================================================
 # SIMULATION CONFIGURATION CONSTANTS
 # ==============================================================================
