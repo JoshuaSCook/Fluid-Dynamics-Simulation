@@ -46,25 +46,29 @@ class fluidGrid:
         self.cell_divergence = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=float)
         self.cell_divergence_color = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=object)
 
+        self.cell_pressure = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=float)
+        self.time_step = 1 / 60
+        self.density = 1
+
     def randomize_velocities(self, vel_a):
         """ Takes the initial arrays of boundary velocities and assigns a random
         value 0.00 <= vel <= 1.00.
         """
-        for i, row in enumerate(vel_a):
-            for j, element in enumerate(row):
-                vel_a[i][j] = round(random.uniform(0.0, 1.0), 2)
+        for x, row in enumerate(vel_a):
+            for y, element in enumerate(row):
+                vel_a[x][y] = round(random.uniform(0.0, 1.0), 2)
 
         return vel_a
 
-    def calculate_cell_velocity_divergence(self, cell_x, cell_y):
+    def calculate_cell_velocity_divergence(self, x, y):
         """ Calculate the divergence of the velocity for a given cell identified by
         interger coordinates (cell_x, cell_y).
         """
         # Get velocities at each edge of cell
-        velocity_R = self.velocities_x[cell_x + 1, cell_y + 0]
-        velocity_L = self.velocities_x[cell_x + 0, cell_y + 0]
-        velocity_T = self.velocities_y[cell_x + 0, cell_y + 1]
-        velocity_B = self.velocities_y[cell_x + 0, cell_y + 0]
+        velocity_R = self.velocities_x[x + 1, y + 0]
+        velocity_L = self.velocities_x[x + 0, y + 0]
+        velocity_T = self.velocities_y[x + 0, y + 1]
+        velocity_B = self.velocities_y[x + 0, y + 0]
 
         # Calculate how fast the fluid's velocity is changing across this cell
         # on either axies
@@ -78,26 +82,60 @@ class fluidGrid:
 
     def update_cell_divergence(self):
         """ Calculates and updates the divergence for each cell. """
-        for i in range(CONFIG.CELL_COUNT_X):
-            for j in range(CONFIG.CELL_COUNT_Y):
-                self.cell_divergence[i][j] = self.calculate_cell_velocity_divergence(i, j)
+        for x in range(CONFIG.CELL_COUNT_X):
+            for y in range(CONFIG.CELL_COUNT_Y):
+                self.cell_divergence[x][y] = self.calculate_cell_velocity_divergence(x, y)
 
     def update_cell_devergence_color(self):
         """  """
-        for i in range(CONFIG.CELL_COUNT_X):
-            for j in range(CONFIG.CELL_COUNT_Y):
-                if -0.01 < self.cell_divergence[i][j] < 0.0:
-                    self.cell_divergence_color[i][j] = (255 * abs(self.cell_divergence[i][j]) * 100, 0, 0)
-                elif self.cell_divergence[i][j] <= -0.01:
-                    self.cell_divergence_color[i][j] = CONFIG.RED
+        for x in range(CONFIG.CELL_COUNT_X):
+            for y in range(CONFIG.CELL_COUNT_Y):
+                if -0.01 < self.cell_divergence[x][y] < 0.0:
+                    self.cell_divergence_color[x][y] = (255 * abs(self.cell_divergence[x][y]) * 100, 0, 0)
+                elif self.cell_divergence[x][y] <= -0.01:
+                    self.cell_divergence_color[x][y] = CONFIG.RED
 
-                elif 0.01 > self.cell_divergence[i][j] > 0.0:
-                    self.cell_divergence_color[i][j] = (0, 0, 255 * abs(self.cell_divergence[i][j]) * 100)
-                elif self.cell_divergence[i][j] >= 0.01:
-                    self.cell_divergence_color[i][j] = CONFIG.BLUE
+                elif 0.01 > self.cell_divergence[x][y] > 0.0:
+                    self.cell_divergence_color[x][y] = (0, 0, 255 * abs(self.cell_divergence[x][y]) * 100)
+                elif self.cell_divergence[x][y] >= 0.01:
+                    self.cell_divergence_color[x][y] = CONFIG.BLUE
                 
                 else:
-                    self.cell_divergence_color[i][j] = CONFIG.BLACK
+                    self.cell_divergence_color[x][y] = CONFIG.BLACK
+
+    def get_pressure(self, x, y):
+        """  """
+        if x < 0 or x >= CONFIG.CELL_COUNT_X or y < 0 or y >= CONFIG.CELL_COUNT_Y:
+            return 0
+        else:
+            return self.cell_pressure[x][y]
+
+
+    def update_cell_pressure(self, x, y):
+        """  """
+
+
+        pressure_R = self.get_pressure(x + 1, y + 0)
+        pressure_L = self.get_pressure(x - 1, y + 0)
+        pressure_T = self.get_pressure(x + 0, y + 1)
+        pressure_B = self.get_pressure(x + 0, y - 1)
+        velocity_R = self.velocities_x[x + 1, y + 0]
+        velocity_L = self.velocities_x[x + 0, y + 0]
+        velocity_T = self.velocities_y[x + 0, y + 1]
+        velocity_B = self.velocities_y[x + 0, y + 0]
+
+        pressure_sum = pressure_R + pressure_L + pressure_T + pressure_B
+        delta_velocities_sum = velocity_R - velocity_L + velocity_T - velocity_B
+        self.cell_pressure[x][y] = (pressure_sum - (self.density * CONFIG.CELL_SIZE * delta_velocities_sum / self.time_step)) / 4
+
+    def iterate_solve_pressure(self, n_iterations):
+        """ Gauss-Seidel Method """
+        for n in range(n_iterations):
+            for x in range(CONFIG.CELL_COUNT_X):
+                for y in range(CONFIG.CELL_COUNT_Y):
+                    self.update_cell_pressure(x, y)
+            
+            
 
 
 # ==============================================================================
@@ -125,6 +163,7 @@ class Simulation:
         self.state.randomize_velocities(self.state.velocities_y)
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
+        self.state.iterate_solve_pressure(1)
 
         # Test printing
         # ======================================================================
@@ -134,6 +173,25 @@ class Simulation:
         print(self.state.velocities_y)
         print("\ndivergence")
         print(self.state.cell_divergence)
+
+        self.state.iterate_solve_pressure(1)
+        print("\ncell pressure")
+        print(self.state.cell_pressure)
+        self.state.iterate_solve_pressure(2)
+        print("\ncell pressure")
+        print(self.state.cell_pressure)
+        self.state.iterate_solve_pressure(3)
+        print("\ncell pressure")
+        print(self.state.cell_pressure)
+        self.state.iterate_solve_pressure(4)
+        print("\ncell pressure")
+        print(self.state.cell_pressure)
+        self.state.iterate_solve_pressure(5)
+        print("\ncell pressure")
+        print(self.state.cell_pressure)
+        self.state.iterate_solve_pressure(10)
+        print("\ncell pressure")
+        print(self.state.cell_pressure)
         # ======================================================================
 
     def handle_events(self):
@@ -156,36 +214,36 @@ class Simulation:
         self.screen.fill(CONFIG.BLACK)
 
         # 1. Render the cell blocks with colors calculated based on div strength
-        for i in range(CONFIG.CELL_COUNT_X):
-            for j in range(CONFIG.CELL_COUNT_Y):
+        for x in range(CONFIG.CELL_COUNT_X):
+            for y in range(CONFIG.CELL_COUNT_Y):
                 pygame.draw.rect(
                     self.screen,
-                    self.state.cell_divergence_color[i][j],
-                    (CONFIG.CELL_SIZE + (i * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (j * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE)
+                    self.state.cell_divergence_color[x][y],
+                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE)
                 )
 
         # 2. Render divergence text
-                text_surface = self.font.render(str(round(self.state.cell_divergence[i][j], 4)), True, CONFIG.WHITE)
+                text_surface = self.font.render(str(round(self.state.cell_divergence[x][y], 4)), True, CONFIG.WHITE)
                 # Blit the text surface onto the screen
-                self.screen.blit(text_surface, (CONFIG.CELL_SIZE + (i * CONFIG.CELL_SIZE) + 10, CONFIG.CELL_SIZE + (j * CONFIG.CELL_SIZE) + 10))
+                self.screen.blit(text_surface, (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE) + 10, CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE) + 10))
 
         # 3. Render the x-velocity buttons
-        for i in range(CONFIG.CELL_COUNT_X + 1):
-            for j in range(CONFIG.CELL_COUNT_Y):
+        for x in range(CONFIG.CELL_COUNT_X + 1):
+            for y in range(CONFIG.CELL_COUNT_Y):
                 pygame.draw.circle(
                     self.screen,
                     CONFIG.WHITE,
-                    (CONFIG.CELL_SIZE + (i * CONFIG.CELL_SIZE), 1.5 * CONFIG.CELL_SIZE + (j * CONFIG.CELL_SIZE)),
+                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), 1.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
                     6
                 )
 
         # 4. render the y-velocity buttons
-        for i in range(CONFIG.CELL_COUNT_X):
-            for j in range(CONFIG.CELL_COUNT_Y + 1):
+        for x in range(CONFIG.CELL_COUNT_X):
+            for y in range(CONFIG.CELL_COUNT_Y + 1):
                 pygame.draw.circle(
                     self.screen,
                     CONFIG.GREEN,
-                    (1.5 * CONFIG.CELL_SIZE + (i * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (j * CONFIG.CELL_SIZE)),
+                    (1.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
                     6
                 )
 
