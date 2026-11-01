@@ -10,7 +10,7 @@ import random
 @dataclass(frozen=True)
 class SimulationConfig:
     """ Sets the global simulation configuation settings. """
-    FPS: int = 60
+    FPS: int = 1
     BLACK: tuple = (0, 0, 0)
     WHITE: tuple = (255, 255, 255)
     RED: tuple = (255, 0, 0)
@@ -187,12 +187,12 @@ class Simulation:
 
         # TEST PRINTING
         # ======================================================================
-        print("x-velocities")
-        print(self.state.velocities_x)
-        print("\ny-velocities")
-        print(self.state.velocities_y)
-        print("\ndivergence")
-        print(self.state.cell_divergence)
+        # print("x-velocities")
+        # print(self.state.velocities_x)
+        # print("\ny-velocities")
+        # print(self.state.velocities_y)
+        # print("\ndivergence")
+        # print(self.state.cell_divergence)
 
     # EVENT HANDLERS
     # ==========================================================================
@@ -212,21 +212,21 @@ class Simulation:
         """  """
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
-        self.state.update_pressures(12) # Higher number --> more accurate. => 8
+        self.state.update_pressures(1) # Higher number --> more accurate. => 8
         self.state.update_velocities()
 
     # RENDERING
     # ==========================================================================
     def render(self):
         """ RENDERED OBJECTS:
-            1. Cells
+            1. Cells blocks and borders
             2. Divergence text
             3. x-velocity vectors
             4. y-velocity vectors
             """
         self.screen.fill(CONFIG.BLACK)
 
-        # 1. Render the cell blocks with colors calculated based on div strength
+        # 1. Render cell blocks with colors calculated based on div strength
         for x in range(CONFIG.CELL_COUNT_X):
             for y in range(CONFIG.CELL_COUNT_Y):
                 pygame.draw.rect(
@@ -234,7 +234,7 @@ class Simulation:
                     self.state.cell_divergence_color[x][y],
                     (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
                 )
-                # Draws the white border
+                # Renders the white border
                 pygame.draw.rect(
                     self.screen,
                     CONFIG.WHITE,
@@ -258,7 +258,7 @@ class Simulation:
                     3
                 )
 
-        # 4. render the y-velocity vectors
+        # 4. Render the y-velocity vectors
         for x, row in enumerate(self.state.velocities_y):
             for y, element in enumerate(row):
                 pygame.draw.line(
