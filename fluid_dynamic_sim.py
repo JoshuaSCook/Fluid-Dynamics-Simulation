@@ -17,9 +17,9 @@ class SimulationConfig:
     GREEN: tuple = (0, 255, 0)
     BLUE: tuple = (0, 0, 255)
 
-    CELL_COUNT_X: int = 6
-    CELL_COUNT_Y: int = 4
-    CELL_SIZE: float = 100.0
+    CELL_COUNT_X: int = 20
+    CELL_COUNT_Y: int = 16
+    CELL_SIZE: float = 40.0
 
     SCREEN_SIZE_X: int = (CELL_COUNT_X + 2) * CELL_SIZE
     SCREEN_SIZE_Y: int = (CELL_COUNT_Y + 2) * CELL_SIZE
@@ -28,7 +28,7 @@ CONFIG = SimulationConfig()
 
 
 # ==============================================================================
-# CELL ARRAY SETUP AND PHYSICS CALCULATIONS
+# CELL ARRAY SETUP AND PHYSICS CALCULATIONS METHODS
 # ==============================================================================
 class fluidGrid:
     """ Initializes the boundary velocities. self.velocities are 2d arrays that are
@@ -50,16 +50,18 @@ class fluidGrid:
         self.time_step = 1 / 60
         self.density = 1
 
-    def randomize_velocities(self, vel_a):
+    def randomize_velocities(self, velocity):
         """ Takes the initial arrays of boundary velocities and assigns a random
         value 0.00 <= vel <= 1.00.
         """
-        for x, row in enumerate(vel_a):
+        for x, row in enumerate(velocity):
             for y, element in enumerate(row):
-                vel_a[x][y] = round(random.uniform(0.0, 1.0), 2)
+                velocity[x][y] = round(random.uniform(0.0, 1.0), 2)
 
-        return vel_a
+        return velocity
 
+    # UPDATE DIVERGENCE
+    # ==========================================================================
     def calculate_cell_velocity_divergence(self, x, y):
         """ Calculate the divergence of the velocity for a given cell identified by
         interger coordinates (cell_x, cell_y).
@@ -103,6 +105,8 @@ class fluidGrid:
                 else:
                     self.cell_divergence_color[x][y] = CONFIG.BLACK
 
+    # UPDATE PRESSURE
+    # ==========================================================================
     def get_pressure(self, x, y):
         """  """
         if x < 0 or x >= CONFIG.CELL_COUNT_X or y < 0 or y >= CONFIG.CELL_COUNT_Y:
@@ -113,8 +117,6 @@ class fluidGrid:
 
     def update_cell_pressure(self, x, y):
         """  """
-
-
         pressure_R = self.get_pressure(x + 1, y + 0)
         pressure_L = self.get_pressure(x - 1, y + 0)
         pressure_T = self.get_pressure(x + 0, y + 1)
@@ -128,16 +130,37 @@ class fluidGrid:
         delta_velocities_sum = velocity_R - velocity_L + velocity_T - velocity_B
         self.cell_pressure[x][y] = (pressure_sum - (self.density * CONFIG.CELL_SIZE * delta_velocities_sum / self.time_step)) / 4
 
-    def iterate_solve_pressure(self, n_iterations):
+    def update_pressures(self, n_iterations):
         """ Gauss-Seidel Method """
         for n in range(n_iterations):
             for x in range(CONFIG.CELL_COUNT_X):
                 for y in range(CONFIG.CELL_COUNT_Y):
                     self.update_cell_pressure(x, y)
-            
-            
+
+    # UPDATE VELOCITIES
+    # ==========================================================================
+    def update_velocities(self):
+        """ v_i = u_i - K * (P_i - P_c)    or    (P_c - Pi)
+        where K is a constant: (density * cell size) / timestep
+        and i is which cell you are referenceing. There are 4 total:
+        R, L, T, B
+        """
+        K = self.time_step / (self.density * CONFIG.CELL_SIZE)
+
+        for x, row in enumerate(self.velocities_x):
+            for y, element in enumerate(row):
+                pressure_R = self.get_pressure(x, y)
+                pressure_L = self.get_pressure(x - 1, y)
+                self.velocities_x[x][y] -= K * (pressure_R - pressure_L)
+
+        for x, row in enumerate(self.velocities_y):
+            for y, element in enumerate(row):
+                pressure_T = self.get_pressure(x, y)
+                pressure_B = self.get_pressure(x , y - 1)
+                self.velocities_y[x][y] -= K * (pressure_T - pressure_B)
 
 
+# ==============================================================================
 # ==============================================================================
 # THE MAIN SIMULATION ENGINE
 # ==============================================================================
@@ -155,17 +178,14 @@ class Simulation:
         # Create a font object
         self.font = pygame.font.SysFont("Monospace", 14)
 
-        # Initiate the fluid grid of cells and velocites
+        # Initiate empty fluid grid of cells and velocites
         self.state = fluidGrid(CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y, CONFIG.CELL_SIZE)
 
         # Fill the velocities arrays with random values
         self.state.randomize_velocities(self.state.velocities_x)
         self.state.randomize_velocities(self.state.velocities_y)
-        self.state.update_cell_divergence()
-        self.state.update_cell_devergence_color()
-        self.state.iterate_solve_pressure(1)
 
-        # Test printing
+        # TEST PRINTING
         # ======================================================================
         print("x-velocities")
         print(self.state.velocities_x)
@@ -174,26 +194,8 @@ class Simulation:
         print("\ndivergence")
         print(self.state.cell_divergence)
 
-        self.state.iterate_solve_pressure(1)
-        print("\ncell pressure")
-        print(self.state.cell_pressure)
-        self.state.iterate_solve_pressure(2)
-        print("\ncell pressure")
-        print(self.state.cell_pressure)
-        self.state.iterate_solve_pressure(3)
-        print("\ncell pressure")
-        print(self.state.cell_pressure)
-        self.state.iterate_solve_pressure(4)
-        print("\ncell pressure")
-        print(self.state.cell_pressure)
-        self.state.iterate_solve_pressure(5)
-        print("\ncell pressure")
-        print(self.state.cell_pressure)
-        self.state.iterate_solve_pressure(10)
-        print("\ncell pressure")
-        print(self.state.cell_pressure)
-        # ======================================================================
-
+    # EVENT HANDLERS
+    # ==========================================================================
     def handle_events(self):
         """ Event handlers (button presses and mouse clicks). """
         for event in pygame.event.get():
@@ -204,6 +206,17 @@ class Simulation:
                 x, y = pygame.mouse.get_pos()  # Get the mouse position
                 print(f'Mouse clicked at: x = {x}, y = {y}')  # Print coordinates
 
+    # UPDATING PHYSICS
+    # ==========================================================================
+    def update_physics(self):
+        """  """
+        self.state.update_cell_divergence()
+        self.state.update_cell_devergence_color()
+        self.state.update_pressures(12)
+        self.state.update_velocities()
+
+    # RENDERING
+    # ==========================================================================
     def render(self):
         """ RENDERED OBJECTS:
             1. Cells
@@ -227,34 +240,36 @@ class Simulation:
                 # Blit the text surface onto the screen
                 self.screen.blit(text_surface, (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE) + 10, CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE) + 10))
 
-        # 3. Render the x-velocity buttons
-        for x in range(CONFIG.CELL_COUNT_X + 1):
-            for y in range(CONFIG.CELL_COUNT_Y):
-                pygame.draw.circle(
-                    self.screen,
-                    CONFIG.WHITE,
-                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), 1.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
-                    6
-                )
+        # # 3. Render the x-velocity buttons
+        # for x in range(CONFIG.CELL_COUNT_X + 1):
+        #     for y in range(CONFIG.CELL_COUNT_Y):
+        #         pygame.draw.circle(
+        #             self.screen,
+        #             CONFIG.WHITE,
+        #             (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), 1.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+        #             6
+        #         )
 
-        # 4. render the y-velocity buttons
-        for x in range(CONFIG.CELL_COUNT_X):
-            for y in range(CONFIG.CELL_COUNT_Y + 1):
-                pygame.draw.circle(
-                    self.screen,
-                    CONFIG.GREEN,
-                    (1.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
-                    6
-                )
+        # # 4. render the y-velocity buttons
+        # for x in range(CONFIG.CELL_COUNT_X):
+        #     for y in range(CONFIG.CELL_COUNT_Y + 1):
+        #         pygame.draw.circle(
+        #             self.screen,
+        #             CONFIG.GREEN,
+        #             (1.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+        #             6
+        #         )
 
         # Updates the screen with all render changes
         pygame.display.update()
 
+    # RUN SIMULATION
+    # ==========================================================================
     def run(self):
         """ Main run loop. What to do each clock tick. """ 
         while self.running:
             self.handle_events()
-            # Physics goes here...
+            self.update_physics()
             self.render()
             self.clock.tick(CONFIG.FPS)
             
