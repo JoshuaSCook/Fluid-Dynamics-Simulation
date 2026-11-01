@@ -108,15 +108,20 @@ class fluidGrid:
     # UPDATE PRESSURE
     # ==========================================================================
     def get_pressure(self, x, y):
-        """  """
+        """ Retrieves the currently calculated pressure for a single cell at
+        coordinates x, y. Assigns pressure to 0.0 if adjacent 'cell' in question
+        is outside the border. 
+        """
         if x < 0 or x >= CONFIG.CELL_COUNT_X or y < 0 or y >= CONFIG.CELL_COUNT_Y:
             return 0
         else:
             return self.cell_pressure[x][y]
 
-
     def update_cell_pressure(self, x, y):
-        """  """
+        """ Calculates the pressure for a cell at coordinates x, y based on the
+        surrounding pressures and velcocities. Updates the pressure array with
+        the newly calculated pressure value.
+        """
         pressure_R = self.get_pressure(x + 1, y + 0)
         pressure_L = self.get_pressure(x - 1, y + 0)
         pressure_T = self.get_pressure(x + 0, y + 1)
@@ -131,7 +136,12 @@ class fluidGrid:
         self.cell_pressure[x][y] = (pressure_sum - (self.density * CONFIG.CELL_SIZE * delta_velocities_sum / self.time_step)) / 4
 
     def update_pressures(self, n_iterations):
-        """ Gauss-Seidel Method """
+        """ Iterates through the entire pressure array and calculates the value
+        of each cell. Because the calulation to find pressure requires us to
+        know the pressures, we use the Gauss-Seidel method as an approximation
+        to converge on the correct values. This works by iterating through the
+        calulations for each all cells repeatedly n-number of times.
+        """
         for n in range(n_iterations):
             for x in range(CONFIG.CELL_COUNT_X):
                 for y in range(CONFIG.CELL_COUNT_Y):
@@ -209,7 +219,12 @@ class Simulation:
     # UPDATING PHYSICS
     # ==========================================================================
     def update_physics(self):
-        """  """
+        """ Order of operations to update all the physical parameters.
+            1. Cell divergence
+            2. Cell divergence color
+            3. Pressures
+            4. Velocities 
+        """
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
         self.state.update_pressures(1) # Higher number --> more accurate. => 8
