@@ -10,16 +10,16 @@ import random
 @dataclass(frozen=True)
 class SimulationConfig:
     """ Sets the global simulation configuation settings. """
-    FPS: int = 1
+    FPS: int = 60
     BLACK: tuple = (0, 0, 0)
     WHITE: tuple = (255, 255, 255)
     RED: tuple = (255, 0, 0)
     GREEN: tuple = (0, 255, 0)
     BLUE: tuple = (0, 0, 255)
 
-    CELL_COUNT_X: int = 6
-    CELL_COUNT_Y: int = 4
-    CELL_SIZE: float = 100.0
+    CELL_COUNT_X: int = 12
+    CELL_COUNT_Y: int = 8
+    CELL_SIZE: float = 100.0 # Float so we can greatly increase resolution
 
     SCREEN_SIZE_X: int = (CELL_COUNT_X + 2) * CELL_SIZE
     SCREEN_SIZE_Y: int = (CELL_COUNT_Y + 2) * CELL_SIZE
@@ -47,8 +47,8 @@ class fluidGrid:
         self.cell_divergence_color = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=object)
 
         self.cell_pressure = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=float)
-        self.time_step = 1 / 60
-        self.density = 1
+        self.time_step = 1 / 30 # seconds
+        self.density = 1 # constant due to incompressiblility assumption
 
     def randomize_velocities(self, velocity):
         """ Takes the initial arrays of boundary velocities and assigns a random
@@ -56,7 +56,7 @@ class fluidGrid:
         """
         for x, row in enumerate(velocity):
             for y, element in enumerate(row):
-                velocity[x][y] = round(random.uniform(-1.0, 1.0), 2)
+                velocity[x][y] = random.uniform(-1.0, 1.0)
 
         return velocity
 
@@ -197,10 +197,10 @@ class Simulation:
 
         # TEST PRINTING
         # ======================================================================
-        # print("x-velocities")
-        # print(self.state.velocities_x)
-        # print("\ny-velocities")
-        # print(self.state.velocities_y)
+        print("x-velocities")
+        print(self.state.velocities_x)
+        print("\ny-velocities")
+        print(self.state.velocities_y)
         # print("\ndivergence")
         # print(self.state.cell_divergence)
 
@@ -227,7 +227,7 @@ class Simulation:
         """
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
-        self.state.update_pressures(1) # Higher number --> more accurate. => 8
+        self.state.update_pressures(12) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
         self.state.update_velocities()
 
     # RENDERING
@@ -258,7 +258,7 @@ class Simulation:
                 )
 
         # 2. Render divergence text
-                text_surface = self.font.render(str(round(self.state.cell_divergence[x][y], 4)), True, CONFIG.WHITE)
+                text_surface = self.font.render(str(format(self.state.cell_divergence[x][y], ".4f")), True, CONFIG.WHITE)
                 # Blit the text surface onto the screen
                 self.screen.blit(text_surface, (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE) + 10, CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE) + 10))
 
