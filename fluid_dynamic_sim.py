@@ -10,7 +10,7 @@ import random
 @dataclass(frozen=True)
 class SimulationConfig:
     """ Sets the global simulation configuation settings. """
-    FPS: int = 60
+    FPS: int = 10
     BLACK: tuple = (0, 0, 0)
     WHITE: tuple = (255, 255, 255)
     RED: tuple = (255, 0, 0)
@@ -21,8 +21,8 @@ class SimulationConfig:
     CELL_COUNT_Y: int = 8
     CELL_SIZE: float = 100.0 # Float so we can greatly increase resolution
 
-    SCREEN_SIZE_X: int = (CELL_COUNT_X + 2) * CELL_SIZE
-    SCREEN_SIZE_Y: int = (CELL_COUNT_Y + 2) * CELL_SIZE
+    SCREEN_SIZE_X: int = (CELL_COUNT_X) * CELL_SIZE + 50
+    SCREEN_SIZE_Y: int = (CELL_COUNT_Y) * CELL_SIZE + 50
 
 CONFIG = SimulationConfig()
 
@@ -50,6 +50,8 @@ class fluidGrid:
         self.time_step = 1 / 30 # seconds
         self.density = 1 # constant due to incompressiblility assumption
 
+        self.solid_cell_map = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=float)
+
     def randomize_velocities(self, velocity):
         """ Takes the initial arrays of boundary velocities and assigns a random
         value -1.00 <= vel <= 1.00.
@@ -58,7 +60,15 @@ class fluidGrid:
             for y, element in enumerate(row):
                 velocity[x][y] = random.uniform(-1.0, 1.0)
 
-        return velocity
+    def initialize_solid_cells(self):
+        """ Gives each border cell a 'True' value for solid.  """
+        for x in range(len(self.solid_cell_map)):
+            for y in range(len(self.solid_cell_map[x])):
+                if x == 0 or y == 0 or x == len(self.solid_cell_map) - 1 or y == len(self.solid_cell_map[x]) - 1:
+                    self.solid_cell_map[x][y] = True
+
+        # Test solid brick
+        self.solid_cell_map[4][3] = True
 
     # UPDATE DIVERGENCE
     # ==========================================================================
@@ -79,7 +89,6 @@ class fluidGrid:
         # Sum to calculate if more fluid is entering (div < 0) or exiting the
         # cell (div > 0)
         divergence = gradient_x + gradient_y
-
         return divergence
 
     def update_cell_divergence(self):
@@ -159,15 +168,24 @@ class fluidGrid:
 
         for x, row in enumerate(self.velocities_x):
             for y, element in enumerate(row):
+
                 pressure_R = self.get_pressure(x, y)
                 pressure_L = self.get_pressure(x - 1, y)
                 self.velocities_x[x][y] -= K * (pressure_R - pressure_L)
 
+                # If cells R or L of velocity[x][y], set it to 0
+                if self.solid_cell_map[x - 1][y] == True or self.solid_cell_map[x][y] == True:
+                    self.velocities_x[x][y] = 0.0
+
+        # If cells T or B of velocity[x][y], set it to 0
         for x, row in enumerate(self.velocities_y):
             for y, element in enumerate(row):
                 pressure_T = self.get_pressure(x, y)
                 pressure_B = self.get_pressure(x , y - 1)
                 self.velocities_y[x][y] -= K * (pressure_T - pressure_B)
+
+                if self.solid_cell_map[x][y - 1] == True or self.solid_cell_map[x][y] == True:
+                    self.velocities_y[x][y] = 0.0            
 
 
 # ==============================================================================
@@ -195,12 +213,15 @@ class Simulation:
         self.state.randomize_velocities(self.state.velocities_x)
         self.state.randomize_velocities(self.state.velocities_y)
 
+        self.state.initialize_solid_cells()
+        print(self.state.solid_cell_map)
+
         # TEST PRINTING
         # ======================================================================
         print("x-velocities")
         print(self.state.velocities_x)
-        print("\ny-velocities")
-        print(self.state.velocities_y)
+        # print("\ny-velocities")
+        # print(self.state.velocities_y)
         # print("\ndivergence")
         # print(self.state.cell_divergence)
 
@@ -227,7 +248,7 @@ class Simulation:
         """
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
-        self.state.update_pressures(12) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
+        self.state.update_pressures(1) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
         self.state.update_velocities()
 
     # RENDERING
@@ -247,20 +268,20 @@ class Simulation:
                 pygame.draw.rect(
                     self.screen,
                     self.state.cell_divergence_color[x][y],
-                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
+                    ((x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
                 )
                 # Renders the white border
                 pygame.draw.rect(
                     self.screen,
                     CONFIG.WHITE,
-                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
+                    ((x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
                     width=1,
                 )
 
         # 2. Render divergence text
                 text_surface = self.font.render(str(format(self.state.cell_divergence[x][y], ".4f")), True, CONFIG.WHITE)
                 # Blit the text surface onto the screen
-                self.screen.blit(text_surface, (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE) + 10, CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE) + 10))
+                self.screen.blit(text_surface, ((x * CONFIG.CELL_SIZE) + 10,(y * CONFIG.CELL_SIZE) + 10))
 
         # 3. Render the x-velocity vectors
         for x, row in enumerate(self.state.velocities_x):
@@ -268,8 +289,8 @@ class Simulation:
                 pygame.draw.line(
                     self.screen,
                     CONFIG.GREEN,
-                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), 1.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
-                    (CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE) + (40 * self.state.velocities_x[x][y]), 1.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+                    ((x * CONFIG.CELL_SIZE), 0.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+                    ((x * CONFIG.CELL_SIZE) + (40 * self.state.velocities_x[x][y]), 0.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
                     3
                 )
 
@@ -279,10 +300,13 @@ class Simulation:
                 pygame.draw.line(
                     self.screen,
                     CONFIG.GREEN,
-                    (1.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
-                    (1.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE) + (40 * self.state.velocities_y[x][y])),
+                    (0.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE)),
+                    (0.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE) + (40 * self.state.velocities_y[x][y])),
                     3
                 )
+
+        print("x-velocities")
+        print(self.state.velocities_x)
 
         # Updates the screen with all render changes
         pygame.display.update()
