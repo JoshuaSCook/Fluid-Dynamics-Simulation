@@ -10,7 +10,7 @@ import random
 @dataclass(frozen=True)
 class SimulationConfig:
     """ Sets the global simulation configuation settings. """
-    FPS: int = 10
+    FPS: int = 4
     BLACK: tuple = (0, 0, 0)
     WHITE: tuple = (255, 255, 255)
     RED: tuple = (255, 0, 0)
@@ -67,7 +67,7 @@ class fluidGrid:
                 if x == 0 or y == 0 or x == len(self.solid_cell_map) - 1 or y == len(self.solid_cell_map[x]) - 1:
                     self.solid_cell_map[x][y] = True
 
-        # Test solid brick
+        # Test solid brick (will utilize later to place fluid obstructions)
         self.solid_cell_map[4][3] = True
 
     # UPDATE DIVERGENCE
@@ -130,19 +130,47 @@ class fluidGrid:
         """ Calculates the pressure for a cell at coordinates x, y based on the
         surrounding pressures and velcocities. Updates the pressure array with
         the newly calculated pressure value.
-        """
-        pressure_R = self.get_pressure(x + 1, y + 0)
-        pressure_L = self.get_pressure(x - 1, y + 0)
-        pressure_T = self.get_pressure(x + 0, y + 1)
-        pressure_B = self.get_pressure(x + 0, y - 1)
-        velocity_R = self.velocities_x[x + 1, y + 0]
-        velocity_L = self.velocities_x[x + 0, y + 0]
-        velocity_T = self.velocities_y[x + 0, y + 1]
-        velocity_B = self.velocities_y[x + 0, y + 0]
+        """ 
 
-        pressure_sum = pressure_R + pressure_L + pressure_T + pressure_B
-        delta_velocities_sum = velocity_R - velocity_L + velocity_T - velocity_B
-        self.cell_pressure[x][y] = (pressure_sum - (self.density * CONFIG.CELL_SIZE * delta_velocities_sum / self.time_step)) / 4
+        if 0 <= (x + 1) and (x + 1) <= (CONFIG.CELL_COUNT_X - 1):
+            flow_R = float(not self.solid_cell_map[x + 1][y])
+        else:
+            flow_R = 0.0
+
+        if 0 <= (x - 1) and (x - 1) <= (CONFIG.CELL_COUNT_X - 1):
+            flow_L = float(not self.solid_cell_map[x - 1][y])
+        else:
+            flow_L = 0.0
+
+        if 0 <= (y + 1) and (y + 1) <= (CONFIG.CELL_COUNT_Y - 1):
+            flow_T = float(not self.solid_cell_map[x][y + 1])
+        else:
+            flow_T = 0.0
+
+        if 0 <= (y - 1) and (y - 1) <= (CONFIG.CELL_COUNT_Y - 1):
+            flow_B = float(not self.solid_cell_map[x][y - 1])
+        else:
+            flow_B = 0.0
+
+        fluid_edge_count = flow_R + flow_L + flow_T + flow_B
+        # print(fluid_edge_count)
+
+        if fluid_edge_count == 0.0:
+            self.cell_pressure[x][y] = 0.0
+
+        else:
+            pressure_R = self.get_pressure(x + 1, y + 0) * flow_R
+            pressure_L = self.get_pressure(x - 1, y + 0) * flow_L
+            pressure_T = self.get_pressure(x + 0, y + 1) * flow_T
+            pressure_B = self.get_pressure(x + 0, y - 1) * flow_B
+            velocity_R = self.velocities_x[x + 1, y + 0] * flow_R
+            velocity_L = self.velocities_x[x + 0, y + 0] * flow_L
+            velocity_T = self.velocities_y[x + 0, y + 1] * flow_T
+            velocity_B = self.velocities_y[x + 0, y + 0] * flow_B
+
+            pressure_sum = pressure_R + pressure_L + pressure_T + pressure_B
+            delta_velocities_sum = (velocity_R - velocity_L) + (velocity_T - velocity_B)
+            self.cell_pressure[x][y] = (pressure_sum - (self.density * CONFIG.CELL_SIZE * delta_velocities_sum / self.time_step)) / fluid_edge_count
 
     def update_pressures(self, n_iterations):
         """ Iterates through the entire pressure array and calculates the value
@@ -162,7 +190,7 @@ class fluidGrid:
         """ v_i = u_i - K * (P_i - P_c)    or    (P_c - Pi)
         where K is a constant: (density * cell size) / timestep
         and i is which cell you are referenceing. There are 4 total:
-        R, L, T, B
+        R, L, T, B. Velocities adjacent to blocks or edges become 0.
         """
         K = self.time_step / (self.density * CONFIG.CELL_SIZE)
 
@@ -177,15 +205,15 @@ class fluidGrid:
                 if self.solid_cell_map[x - 1][y] == True or self.solid_cell_map[x][y] == True:
                     self.velocities_x[x][y] = 0.0
 
-        # If cells T or B of velocity[x][y], set it to 0
         for x, row in enumerate(self.velocities_y):
             for y, element in enumerate(row):
                 pressure_T = self.get_pressure(x, y)
                 pressure_B = self.get_pressure(x , y - 1)
                 self.velocities_y[x][y] -= K * (pressure_T - pressure_B)
 
+                # If cells T or B of velocity[x][y], set it to 0
                 if self.solid_cell_map[x][y - 1] == True or self.solid_cell_map[x][y] == True:
-                    self.velocities_y[x][y] = 0.0            
+                    self.velocities_y[x][y] = 0.0
 
 
 # ==============================================================================
@@ -218,8 +246,8 @@ class Simulation:
 
         # TEST PRINTING
         # ======================================================================
-        print("x-velocities")
-        print(self.state.velocities_x)
+        # print("x-velocities")
+        # print(self.state.velocities_x)
         # print("\ny-velocities")
         # print(self.state.velocities_y)
         # print("\ndivergence")
@@ -304,9 +332,6 @@ class Simulation:
                     (0.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE) + (40 * self.state.velocities_y[x][y])),
                     3
                 )
-
-        print("x-velocities")
-        print(self.state.velocities_x)
 
         # Updates the screen with all render changes
         pygame.display.update()
