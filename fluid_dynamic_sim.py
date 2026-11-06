@@ -215,6 +215,19 @@ class fluidGrid:
                 if self.solid_cell_map[x][y - 1] == True or self.solid_cell_map[x][y] == True:
                     self.velocities_y[x][y] = 0.0
 
+    def sample_bilinear_interpolation(self, world_position=[x,y], cell_size=CONFIG.CELL_SIZE):
+        """ given any (x,y) compute the bilinear interpolated value for velocity
+            based on the 4 given x-velocites and y-velocities respectively that
+            most closely surround the (x,y) coordinate. See notes for formula.
+        """
+        #
+    
+    def get_velocity_at_any_position(self, world_position=[x,y]):
+        """  """
+        # velocity_x = sample_bilinear_interpolation()
+        # velocity_y = sample_bilinear_interpolation()
+        # return new_vel = [velocity_x, velocity_y]
+
 
 # ==============================================================================
 # ==============================================================================
@@ -276,7 +289,7 @@ class Simulation:
         """
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
-        self.state.update_pressures(1) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
+        self.state.update_pressures(10) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
         self.state.update_velocities()
 
     # RENDERING
