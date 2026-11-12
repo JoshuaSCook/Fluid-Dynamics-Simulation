@@ -10,7 +10,7 @@ import random
 @dataclass(frozen=True)
 class SimulationConfig:
     """ Sets the global simulation configuation settings. """
-    FPS: int = 4
+    FPS: int = 1
     BLACK: tuple = (0, 0, 0)
     WHITE: tuple = (255, 255, 255)
     RED: tuple = (255, 0, 0)
@@ -20,6 +20,7 @@ class SimulationConfig:
     CELL_COUNT_X: int = 12
     CELL_COUNT_Y: int = 8
     CELL_SIZE: float = 100.0 # Float so we can greatly increase resolution
+    CELL_DIVISIONS = 4
 
     SCREEN_SIZE_X: int = (CELL_COUNT_X) * CELL_SIZE + 50
     SCREEN_SIZE_Y: int = (CELL_COUNT_Y) * CELL_SIZE + 50
@@ -52,6 +53,8 @@ class fluidGrid:
 
         self.solid_cell_map = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=float)
 
+        self.interpolated_velocities = np.zeros(((CONFIG.CELL_COUNT_X) * CONFIG.CELL_DIVISIONS, (CONFIG.CELL_COUNT_Y) * CONFIG.CELL_DIVISIONS), dtype=object)
+
     def randomize_velocities(self, velocity):
         """ Takes the initial arrays of boundary velocities and assigns a random
         value -1.00 <= vel <= 1.00.
@@ -67,8 +70,13 @@ class fluidGrid:
                 if x == 0 or y == 0 or x == len(self.solid_cell_map) - 1 or y == len(self.solid_cell_map[x]) - 1:
                     self.solid_cell_map[x][y] = True
 
-        # Test solid brick (will utilize later to place fluid obstructions)
-        self.solid_cell_map[4][3] = True
+    def initiate_interpolated_velocities(self):
+        """  """
+        # Initiates [0, 0] (x and y velocity componentes) for each interpolated position
+        for x, row in enumerate(self.interpolated_velocities):
+            for y, element in enumerate(row):
+                self.interpolated_velocities[x][y] = [0, 0]
+        # print(self.interpolated_velocities)
 
     # UPDATE DIVERGENCE
     # ==========================================================================
@@ -215,18 +223,109 @@ class fluidGrid:
                 if self.solid_cell_map[x][y - 1] == True or self.solid_cell_map[x][y] == True:
                     self.velocities_y[x][y] = 0.0
 
-    def sample_bilinear_interpolation(self, world_position=[x,y], cell_size=CONFIG.CELL_SIZE):
+
+    # UPDATE INTERPOLATED VELOCITIES
+    # ==========================================================================
+    def find_four_nearest_velocity_indicies(self, i, j, axis):
+        """  """
+        # Find coordinates in terms of cells
+        if axis == 'horizontal':
+            x = (i / CONFIG.CELL_DIVISIONS)
+            y = (j / CONFIG.CELL_DIVISIONS) - 0.5
+            Q = self.velocities_x.copy()
+            
+            # print(x, y)
+        elif axis == 'vertical':
+            x = (i / CONFIG.CELL_DIVISIONS) - 0.5
+            y = (j / CONFIG.CELL_DIVISIONS)
+            Q = self.velocities_y.copy()
+
+        min_x = int(x // 1)
+        max_x = int(-(-x // 1))
+        min_y = int(y // 1)
+        max_y = int(-(-y // 1))
+        if max_x == min_x:
+            max_x += 1
+        if max_y == min_y:
+            max_y += 1
+
+        # print(min_x, max_x, min_y, max_y)
+
+        
+        q11 = (Q[min_x][min_y])
+        q21 = (Q[max_x][min_y])
+        q12 = (Q[min_x][max_y])
+        q22 = (Q[max_x][max_y])
+
+        # print(q12)
+
+        # q11 = [min_x, min_y]
+        # q21 = [max_x, min_y]
+        # q12 = [min_x, max_y]
+        # q22 = [max_x, max_y]
+
+        # print(q11, q21, q12, q22)
+        return [[min_x, max_x, min_y, max_y], [q11, q21, q12, q22]]
+
+    def sample_bilinear_interpolation(self, i, j, axis):
         """ given any (x,y) compute the bilinear interpolated value for velocity
             based on the 4 given x-velocites and y-velocities respectively that
             most closely surround the (x,y) coordinate. See notes for formula.
         """
-        #
+        nearest_indicies = self.find_four_nearest_velocity_indicies(i, j, axis)
+        x_1 = nearest_indicies[0][0]
+        x_2 = nearest_indicies[0][1]
+        y_1 = nearest_indicies[0][2]
+        y_2 = nearest_indicies[0][3]
+
+        q11 = nearest_indicies[1][0]
+        q21 = nearest_indicies[1][1]
+        q12 = nearest_indicies[1][2]
+        q22 = nearest_indicies[1][3]
+
+        x = i / CONFIG.CELL_DIVISIONS
+        y = j / CONFIG.CELL_DIVISIONS
+
+        min_x = int(x // 1)
+        max_x = int(-(-x // 1))
+        min_y = int(y // 1)
+        max_y = int(-(-y // 1))
+        if max_x == min_x:
+            max_x += 1
+        if max_y == min_y:
+            max_y += 1
+        print(min_x, min_y)
+
+        if self.solid_cell_map[min_x][min_y] == True:
+            axis_velocity = 0.0
+
+        elif x != x_1 and x != x_2 and y != y_1 and y != y_2:
+            interpolation_T = ((x_2 - x) / (x_2 - x_1) * q11) + ((x - x_1) / (x_2 - x_1) * q21)
+            interpolation_B = ((x_2 - x) / (x_2 - x_1) * q12) + ((x - x_1) / (x_2 - x_1) * q22)
+
+            bilinear_iterpolation = ((y_2 - y) / (y_2 - y_1) * interpolation_T) + ((y - y_1) / (y_2 - y_1) * interpolation_B)
+
+            axis_velocity = bilinear_iterpolation # Redundant but helps with clarity
+        
+        else:
+            axis_velocity = 0.0
+        return axis_velocity
     
-    def get_velocity_at_any_position(self, world_position=[x,y]):
+    def get_velocity_at_any_position(self, i, j):
         """  """
-        # velocity_x = sample_bilinear_interpolation()
-        # velocity_y = sample_bilinear_interpolation()
-        # return new_vel = [velocity_x, velocity_y]
+        if i < 0.5 * CONFIG.CELL_DIVISIONS or i >= CONFIG.CELL_COUNT_X * CONFIG.CELL_DIVISIONS - (0.5 * CONFIG.CELL_DIVISIONS) or j < 0.5 * CONFIG.CELL_DIVISIONS or j >= CONFIG.CELL_COUNT_Y * CONFIG.CELL_DIVISIONS - (0.5 * CONFIG.CELL_DIVISIONS):
+            velocity = [0.0, 0.0]
+        else:
+            velocity_x = self.sample_bilinear_interpolation(i, j, 'horizontal')
+            velocity_y = self.sample_bilinear_interpolation(i, j, 'vertical')
+            velocity = [velocity_x, velocity_y]
+        return velocity
+
+    def update_interpolated_velocities(self):
+        """ i and j are the indicies of the interpolated velocites array """
+        for i, row in enumerate(self.interpolated_velocities):
+            for j, element in enumerate(row):
+                self.interpolated_velocities[i][j] = self.get_velocity_at_any_position(i, j)
 
 
 # ==============================================================================
@@ -256,6 +355,8 @@ class Simulation:
 
         self.state.initialize_solid_cells()
         print(self.state.solid_cell_map)
+
+        self.state.initiate_interpolated_velocities()
 
         # TEST PRINTING
         # ======================================================================
@@ -289,8 +390,9 @@ class Simulation:
         """
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
-        self.state.update_pressures(10) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
+        self.state.update_pressures(1) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
         self.state.update_velocities()
+        self.state.update_interpolated_velocities()
 
     # RENDERING
     # ==========================================================================
@@ -343,7 +445,18 @@ class Simulation:
                     CONFIG.GREEN,
                     (0.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE)),
                     (0.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE) + (40 * self.state.velocities_y[x][y])),
-                    3
+                    4
+                )
+
+        # 5. Render the velocity vectors at any point
+        for x, row in enumerate(self.state.interpolated_velocities):
+            for y, element in enumerate(row):
+                pygame.draw.line(
+                    self.screen,
+                    CONFIG.GREEN,
+                    ((x * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS),(y * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS)),
+                    ((x * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS) + (30 * self.state.interpolated_velocities[x][y][0]), (y * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS) + (30 * self.state.interpolated_velocities[x][y][1])),
+                    1
                 )
 
         # Updates the screen with all render changes

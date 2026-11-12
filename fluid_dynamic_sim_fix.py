@@ -1,0 +1,476 @@
+import sys
+import numpy as np
+import pygame
+from dataclasses import dataclass
+import random
+
+# ==============================================================================
+# SIMULATION CONFIGURATION CONSTANTS
+# ==============================================================================
+@dataclass(frozen=True)
+class SimulationConfig:
+    """ Sets the global simulation configuation settings. """
+    FPS: int = 1
+    BLACK: tuple = (0, 0, 0)
+    WHITE: tuple = (255, 255, 255)
+    RED: tuple = (255, 0, 0)
+    GREEN: tuple = (0, 255, 0)
+    BLUE: tuple = (0, 0, 255)
+
+    CELL_COUNT_X: int = 12
+    CELL_COUNT_Y: int = 8
+    CELL_SIZE: float = 100.0 # Float so we can greatly increase resolution
+    CELL_DIVISIONS: float = 4
+
+    SCREEN_SIZE_X: int = (CELL_COUNT_X) * CELL_SIZE + 50
+    SCREEN_SIZE_Y: int = (CELL_COUNT_Y) * CELL_SIZE + 50
+
+CONFIG = SimulationConfig()
+
+
+# ==============================================================================
+# CELL ARRAY SETUP AND PHYSICS CALCULATIONS METHODS
+# ==============================================================================
+class fluidGrid:
+    """ Initializes the boundary velocities. self.velocities are 2d arrays that are
+    n-number of cells in rows and columns + 1 to assign a velocity at every
+    edge.
+    """
+    def __init__(self, cell_count_x, cell_count_y, cell_size):
+        self.cell_count_x = int(CONFIG.CELL_COUNT_X)
+        self.cell_count_y = int(CONFIG.CELL_COUNT_Y)
+        self.cell_size = float(CONFIG.CELL_SIZE)
+
+        self.velocities_x = np.zeros((CONFIG.CELL_COUNT_X + 1, CONFIG.CELL_COUNT_Y), dtype=float)
+        self.velocities_y = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y + 1), dtype=float)
+
+        self.cell_divergence = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=float)
+        self.cell_divergence_color = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=object)
+
+        self.cell_pressure = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=float)
+        self.time_step = 1 / 30 # seconds
+        self.density = 1 # constant due to incompressiblility assumption
+
+        self.solid_cell_map = np.zeros((CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y), dtype=float)
+
+        # self.interpolated_velocities = np.zeros((CONFIG.CELL_COUNT_X * CONFIG.CELL_DIVISIONS, CONFIG.CELL_COUNT_Y * CONFIG.CELL_DIVISIONS), dtype=float)
+        self.interpolated_velocities = np.zeros((CONFIG.CELL_COUNT_X * CONFIG.CELL_DIVISIONS, CONFIG.CELL_COUNT_Y * CONFIG.CELL_DIVISIONS), dtype=object)
+        # print(self.interpolated_velocities)
+
+        for x in range(CONFIG.CELL_COUNT_X * CONFIG.CELL_DIVISIONS):
+            for y in range(CONFIG.CELL_COUNT_Y * CONFIG.CELL_DIVISIONS):
+                self.interpolated_velocities[x][y] = [0, 0]
+        # print(self.interpolated_velocities)
+
+    def randomize_velocities(self, velocity):
+        """ Takes the initial arrays of boundary velocities and assigns a random
+        value -1.00 <= vel <= 1.00.
+        """
+        for x, row in enumerate(velocity):
+            for y, element in enumerate(row):
+                velocity[x][y] = random.uniform(-1.0, 1.0)
+
+    def initialize_solid_cells(self):
+        """ Gives each border cell a 'True' value for solid.  """
+        for x in range(len(self.solid_cell_map)):
+            for y in range(len(self.solid_cell_map[x])):
+                if x == 0 or y == 0 or x == len(self.solid_cell_map) - 1 or y == len(self.solid_cell_map[x]) - 1:
+                    self.solid_cell_map[x][y] = True
+
+        # Test solid brick (will utilize later to place fluid obstructions)
+        # self.solid_cell_map[4][3] = True
+
+    # def initialize_interpolated_velocites(self):
+    #     """  """
+    #     #
+
+    # UPDATE DIVERGENCE
+    # ==========================================================================
+    def calculate_cell_velocity_divergence(self, x, y):
+        """ Calculate the divergence of the velocity for a given cell identified by
+        interger coordinates (cell_x, cell_y).
+        """
+        # Get velocities at each edge of cell
+        velocity_R = self.velocities_x[x + 1, y + 0]
+        velocity_L = self.velocities_x[x + 0, y + 0]
+        velocity_T = self.velocities_y[x + 0, y + 1]
+        velocity_B = self.velocities_y[x + 0, y + 0]
+
+        # Calculate how fast the fluid's velocity is changing across this cell
+        # on either axies
+        gradient_x = (velocity_R - velocity_L) / self.cell_size
+        gradient_y = (velocity_T - velocity_B) / self.cell_size
+        # Sum to calculate if more fluid is entering (div < 0) or exiting the
+        # cell (div > 0)
+        divergence = gradient_x + gradient_y
+        return divergence
+
+    def update_cell_divergence(self):
+        """ Calculates and updates the divergence for each cell. """
+        for x in range(CONFIG.CELL_COUNT_X):
+            for y in range(CONFIG.CELL_COUNT_Y):
+                self.cell_divergence[x][y] = self.calculate_cell_velocity_divergence(x, y)
+
+    def update_cell_devergence_color(self):
+        """  """
+        for x in range(CONFIG.CELL_COUNT_X):
+            for y in range(CONFIG.CELL_COUNT_Y):
+                if -0.01 < self.cell_divergence[x][y] < 0.0:
+                    self.cell_divergence_color[x][y] = (255 * abs(self.cell_divergence[x][y]) * 100, 0, 0)
+                elif self.cell_divergence[x][y] <= -0.01:
+                    self.cell_divergence_color[x][y] = CONFIG.RED
+
+                elif 0.01 > self.cell_divergence[x][y] > 0.0:
+                    self.cell_divergence_color[x][y] = (0, 0, 255 * abs(self.cell_divergence[x][y]) * 100)
+                elif self.cell_divergence[x][y] >= 0.01:
+                    self.cell_divergence_color[x][y] = CONFIG.BLUE
+                
+                else:
+                    self.cell_divergence_color[x][y] = CONFIG.BLACK
+
+    # UPDATE PRESSURE
+    # ==========================================================================
+    def get_pressure(self, x, y):
+        """ Retrieves the currently calculated pressure for a single cell at
+        coordinates x, y. Assigns pressure to 0.0 if adjacent 'cell' in question
+        is outside the border. 
+        """
+        if x < 0 or x >= CONFIG.CELL_COUNT_X or y < 0 or y >= CONFIG.CELL_COUNT_Y:
+            return 0
+        else:
+            return self.cell_pressure[x][y]
+
+    def update_cell_pressure(self, x, y):
+        """ Calculates the pressure for a cell at coordinates x, y based on the
+        surrounding pressures and velcocities. Updates the pressure array with
+        the newly calculated pressure value.
+        """ 
+
+        if 0 <= (x + 1) and (x + 1) <= (CONFIG.CELL_COUNT_X - 1):
+            flow_R = float(not self.solid_cell_map[x + 1][y])
+        else:
+            flow_R = 0.0
+
+        if 0 <= (x - 1) and (x - 1) <= (CONFIG.CELL_COUNT_X - 1):
+            flow_L = float(not self.solid_cell_map[x - 1][y])
+        else:
+            flow_L = 0.0
+
+        if 0 <= (y + 1) and (y + 1) <= (CONFIG.CELL_COUNT_Y - 1):
+            flow_T = float(not self.solid_cell_map[x][y + 1])
+        else:
+            flow_T = 0.0
+
+        if 0 <= (y - 1) and (y - 1) <= (CONFIG.CELL_COUNT_Y - 1):
+            flow_B = float(not self.solid_cell_map[x][y - 1])
+        else:
+            flow_B = 0.0
+
+        fluid_edge_count = flow_R + flow_L + flow_T + flow_B
+        # print(fluid_edge_count)
+
+        if fluid_edge_count == 0.0:
+            self.cell_pressure[x][y] = 0.0
+
+        else:
+            pressure_R = self.get_pressure(x + 1, y + 0) * flow_R
+            pressure_L = self.get_pressure(x - 1, y + 0) * flow_L
+            pressure_T = self.get_pressure(x + 0, y + 1) * flow_T
+            pressure_B = self.get_pressure(x + 0, y - 1) * flow_B
+            velocity_R = self.velocities_x[x + 1, y + 0] * flow_R
+            velocity_L = self.velocities_x[x + 0, y + 0] * flow_L
+            velocity_T = self.velocities_y[x + 0, y + 1] * flow_T
+            velocity_B = self.velocities_y[x + 0, y + 0] * flow_B
+
+            pressure_sum = pressure_R + pressure_L + pressure_T + pressure_B
+            delta_velocities_sum = (velocity_R - velocity_L) + (velocity_T - velocity_B)
+            self.cell_pressure[x][y] = (pressure_sum - (self.density * CONFIG.CELL_SIZE * delta_velocities_sum / self.time_step)) / fluid_edge_count
+
+    def update_pressures(self, n_iterations):
+        """ Iterates through the entire pressure array and calculates the value
+        of each cell. Because the calulation to find pressure requires us to
+        know the pressures, we use the Gauss-Seidel method as an approximation
+        to converge on the correct values. This works by iterating through the
+        calulations for each all cells repeatedly n-number of times.
+        """
+        for n in range(n_iterations):
+            for x in range(CONFIG.CELL_COUNT_X):
+                for y in range(CONFIG.CELL_COUNT_Y):
+                    self.update_cell_pressure(x, y)
+
+    # UPDATE VELOCITIES
+    # ==========================================================================
+    def update_velocities(self):
+        """ v_i = u_i - K * (P_i - P_c)    or    (P_c - Pi)
+        where K is a constant: (density * cell size) / timestep
+        and i is which cell you are referenceing. There are 4 total:
+        R, L, T, B. Velocities adjacent to blocks or edges become 0.
+        """
+        K = self.time_step / (self.density * CONFIG.CELL_SIZE)
+
+        for x, row in enumerate(self.velocities_x):
+            for y, element in enumerate(row):
+
+                pressure_R = self.get_pressure(x, y)
+                pressure_L = self.get_pressure(x - 1, y)
+                self.velocities_x[x][y] -= K * (pressure_R - pressure_L)
+
+                # If cells R or L of velocity[x][y], set it to 0
+                if self.solid_cell_map[x - 1][y] == True or self.solid_cell_map[x][y] == True:
+                    self.velocities_x[x][y] = 0.0
+
+        for x, row in enumerate(self.velocities_y):
+            for y, element in enumerate(row):
+                pressure_T = self.get_pressure(x, y)
+                pressure_B = self.get_pressure(x , y - 1)
+                self.velocities_y[x][y] -= K * (pressure_T - pressure_B)
+
+                # If cells T or B of velocity[x][y], set it to 0
+                if self.solid_cell_map[x][y - 1] == True or self.solid_cell_map[x][y] == True:
+                    self.velocities_y[x][y] = 0.0
+
+    def get_four_nearest_velocity_indicies(self, x_px, y_px, axis):
+        """ Returns the floor indices and the raw shifted coordinates """
+        x = x_px / CONFIG.CELL_SIZE
+        y = y_px / CONFIG.CELL_SIZE
+
+        if axis == 'horizontal':
+            pos_x = x
+            pos_y = y - 0.5
+        elif axis == 'vertical':
+            pos_x = x - 0.5
+            pos_y = y
+
+        # Find the lower corner floor index
+        min_x = int(pos_x // 1)
+        min_y = int(pos_y // 1)
+        
+        # Keep max exactly 1 unit higher before clamping
+        max_x = min_x + 1
+        max_y = min_y + 1
+
+        return (min_x, max_x, min_y, max_y, pos_x, pos_y)
+
+    def sample_bilinear_interpolation(self, x_px, y_px, axis):
+        """ Given any (x,y) compute the robust bilinear interpolated value for velocity """
+
+        if axis == 'horizontal':
+            coords = self.get_four_nearest_velocity_indicies(x_px, y_px, axis)
+            q = self.velocities_x
+        elif axis == 'vertical':
+            coords = self.get_four_nearest_velocity_indicies(x_px, y_px, axis)
+            q = self.velocities_y
+
+        max_y_idx = q.shape[0] - 1
+        max_x_idx = q.shape[1] - 1
+
+        # 1. Unpack indices and raw floating positions
+        min_x, max_x, min_y, max_y, pos_x, pos_y = coords
+
+        # 2. Calculate interpolation weights (fractional distances) *before* clamping
+        # This keeps the math independent of boundary clamping limits
+        tx = pos_x - min_x
+        ty = pos_y - min_y
+
+        # 3. Safely clamp indices to grid array sizes
+        x_1 = max(0, min(min_x, max_x_idx))
+        x_2 = max(0, min(max_x, max_x_idx))
+        y_1 = max(0, min(min_y, max_y_idx))
+        y_2 = max(0, min(max_y, max_y_idx))
+
+        # 4. Look up values from grid
+        q11 = q[y_1, x_1]
+        q21 = q[y_1, x_2]
+        q12 = q[y_2, x_1]
+        q22 = q[y_2, x_2]
+
+        # 5. Interpolate smoothly using weights tx and ty (No division needed!)
+        interpolation_T = (1 - tx) * q11 + tx * q21
+        interpolation_B = (1 - tx) * q12 + tx * q22
+        
+        axis_velocity = (1 - ty) * interpolation_T + ty * interpolation_B
+
+        return axis_velocity
+
+
+
+    def get_velocity_at_any_position(self, x_px, y_px):
+        """  """
+        velocity_x = self.sample_bilinear_interpolation(x_px, y_px, 'horizontal')
+        velocity_y = self.sample_bilinear_interpolation(x_px, y_px, 'vertical')
+        velocity = [velocity_x, velocity_y]
+        return velocity
+
+    def update_interpolated_velocities(self):
+        """  """
+        for x, row in enumerate(self.interpolated_velocities):
+            for y, element in enumerate(row):
+                x_px = x * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS
+                y_px = y * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS
+                print(x_px)
+                self.interpolated_velocities[x][y] = self.get_velocity_at_any_position(x_px, y_px)
+        # print("\n",self.interpolated_velocities)
+
+
+# ==============================================================================
+# ==============================================================================
+# THE MAIN SIMULATION ENGINE
+# ==============================================================================
+class Simulation:
+    """ Execution of sim initiation, logic, math operations, rendering and main 
+    run loop.
+    """
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((CONFIG.SCREEN_SIZE_X, CONFIG.SCREEN_SIZE_Y))
+        pygame.display.set_caption("Simulation")
+        self.clock = pygame.time.Clock()
+        self.running = True
+
+        # Create a font object
+        self.font = pygame.font.SysFont("Monospace", 14)
+
+        # Initiate empty fluid grid of cells and velocites
+        self.state = fluidGrid(CONFIG.CELL_COUNT_X, CONFIG.CELL_COUNT_Y, CONFIG.CELL_SIZE)
+
+        # Fill the velocities arrays with random values
+        self.state.randomize_velocities(self.state.velocities_x)
+        self.state.randomize_velocities(self.state.velocities_y)
+
+        self.state.initialize_solid_cells()
+        print(self.state.solid_cell_map)
+
+        # self.state.get_four_nearest_velocity_indicies(230, 175, 'horizontal')
+        # self.state.get_four_nearest_velocity_indicies(230, 175, 'vertical')
+
+        # self.state.get_velocity_at_any_position(230, 175)
+    
+
+        # TEST PRINTING
+        # ======================================================================
+        # print("x-velocities")
+        # print(self.state.velocities_x)
+        # print("\ny-velocities")
+        # print(self.state.velocities_y)
+        # print("\ndivergence")
+        # print(self.state.cell_divergence)
+
+    # EVENT HANDLERS
+    # ==========================================================================
+    def handle_events(self):
+        """ Event handlers (button presses and mouse clicks). """
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                x, y = pygame.mouse.get_pos()  # Get the mouse position
+                print(f'Mouse clicked at: x = {x}, y = {y}')  # Print coordinates
+
+    # UPDATING PHYSICS
+    # ==========================================================================
+    def update_physics(self):
+        """ Order of operations to update all the physical parameters.
+            1. Cell divergence
+            2. Cell divergence color
+            3. Pressures
+            4. Velocities 
+        """
+        self.state.update_cell_divergence()
+        self.state.update_cell_devergence_color()
+        self.state.update_pressures(1) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
+        self.state.update_velocities()
+        self.state.update_interpolated_velocities()
+
+    # RENDERING
+    # ==========================================================================
+    def render(self):
+        """ RENDERED OBJECTS:
+            1. Cells blocks and borders
+            2. Divergence text
+            3. x-velocity vectors
+            4. y-velocity vectors
+            """
+        self.screen.fill(CONFIG.BLACK)
+
+        # 1. Render cell blocks with colors calculated based on div strength
+        for x in range(CONFIG.CELL_COUNT_X):
+            for y in range(CONFIG.CELL_COUNT_Y):
+                pygame.draw.rect(
+                    self.screen,
+                    self.state.cell_divergence_color[x][y],
+                    ((x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
+                )
+                # Renders the white border
+                pygame.draw.rect(
+                    self.screen,
+                    CONFIG.WHITE,
+                    ((x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE), CONFIG.CELL_SIZE, CONFIG.CELL_SIZE),
+                    width=1,
+                )
+
+        # 2. Render divergence text
+                text_surface = self.font.render(str(format(self.state.cell_divergence[x][y], ".4f")), True, CONFIG.WHITE)
+                # Blit the text surface onto the screen
+                self.screen.blit(text_surface, ((x * CONFIG.CELL_SIZE) + 10,(y * CONFIG.CELL_SIZE) + 10))
+
+        # 5. Render the velocity vectors at any point
+        for x, row in enumerate(self.state.interpolated_velocities):
+            for y, element in enumerate(row):
+                pygame.draw.line(
+                    self.screen,
+                    CONFIG.GREEN,
+                    ((x * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS),(y * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS)),
+                    ((x * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS) + (100 * self.state.interpolated_velocities[x][y][0]), (y * CONFIG.CELL_SIZE / CONFIG.CELL_DIVISIONS) + (100 * self.state.interpolated_velocities[x][y][1])),
+                    2
+                )
+
+
+        # 3. Render the x-velocity vectors
+        for x, row in enumerate(self.state.velocities_x):
+            for y, element in enumerate(row):
+                pygame.draw.line(
+                    self.screen,
+                    CONFIG.WHITE,
+                    ((x * CONFIG.CELL_SIZE), 0.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+                    ((x * CONFIG.CELL_SIZE) + (40 * self.state.velocities_x[x][y]), 0.5 * CONFIG.CELL_SIZE + (y * CONFIG.CELL_SIZE)),
+                    3
+                )
+
+        # 4. Render the y-velocity vectors
+        for x, row in enumerate(self.state.velocities_y):
+            for y, element in enumerate(row):
+                pygame.draw.line(
+                    self.screen,
+                    CONFIG.WHITE,
+                    (0.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE)),
+                    (0.5 * CONFIG.CELL_SIZE + (x * CONFIG.CELL_SIZE),(y * CONFIG.CELL_SIZE) + (40 * self.state.velocities_y[x][y])),
+                    3
+                )
+
+        
+
+        # Updates the screen with all render changes
+        pygame.display.update()
+
+    # RUN SIMULATION
+    # ==========================================================================
+    def run(self):
+        """ Main run loop. What to do each clock tick. """ 
+        while self.running:
+            self.handle_events()
+            self.update_physics()
+            self.render()
+            self.clock.tick(CONFIG.FPS)
+            # pygame.quit()
+
+        pygame.quit()
+        sys.exit()
+
+
+# ==============================================================================
+# EXECUTION ENTRY POINT
+# ==============================================================================
+if __name__ == "__main__":
+    simulation = Simulation()
+    simulation.run()
