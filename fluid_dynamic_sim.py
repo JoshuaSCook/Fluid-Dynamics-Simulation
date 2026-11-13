@@ -20,7 +20,7 @@ class SimulationConfig:
     CELL_COUNT_X: int = 12
     CELL_COUNT_Y: int = 8
     CELL_SIZE: float = 100.0 # Float so we can greatly increase resolution
-    CELL_DIVISIONS = 4
+    CELL_DIVISIONS = 8
 
     SCREEN_SIZE_X: int = (CELL_COUNT_X) * CELL_SIZE + 50
     SCREEN_SIZE_Y: int = (CELL_COUNT_Y) * CELL_SIZE + 50
@@ -227,19 +227,25 @@ class fluidGrid:
     # UPDATE INTERPOLATED VELOCITIES
     # ==========================================================================
     def find_four_nearest_velocity_indicies(self, i, j, axis):
-        """  """
-        # Find coordinates in terms of cells
+        """ Takes the index of some sub-velocity you want to interpolate. Choose
+        if we are interpolating for the horizontal velocity component or the
+        vertical velocity component. This returns a n=2 list that gives the cell
+        index boundaries for the 4 nearest (horz. or vert.) velocites as well as
+        the respective velocitiey components q11, etc. """
+        # Find coordinates in terms of cells - can give a decimal coordinate.
         if axis == 'horizontal':
             x = (i / CONFIG.CELL_DIVISIONS)
             y = (j / CONFIG.CELL_DIVISIONS) - 0.5
-            Q = self.velocities_x.copy()
+            Q = self.velocities_x
             
-            # print(x, y)
         elif axis == 'vertical':
             x = (i / CONFIG.CELL_DIVISIONS) - 0.5
             y = (j / CONFIG.CELL_DIVISIONS)
-            Q = self.velocities_y.copy()
+            Q = self.velocities_y
 
+        # This takes the sub-velocity position (relative to the cells). Rounds
+        # up and down to find the boundary indicies for the 4 surrounding
+        # velocities.
         min_x = int(x // 1)
         max_x = int(-(-x // 1))
         min_y = int(y // 1)
@@ -249,22 +255,12 @@ class fluidGrid:
         if max_y == min_y:
             max_y += 1
 
-        # print(min_x, max_x, min_y, max_y)
-
-        
+        # Gives the velocity component for each of the 4 verticies
         q11 = (Q[min_x][min_y])
         q21 = (Q[max_x][min_y])
         q12 = (Q[min_x][max_y])
         q22 = (Q[max_x][max_y])
 
-        # print(q12)
-
-        # q11 = [min_x, min_y]
-        # q21 = [max_x, min_y]
-        # q12 = [min_x, max_y]
-        # q22 = [max_x, max_y]
-
-        # print(q11, q21, q12, q22)
         return [[min_x, max_x, min_y, max_y], [q11, q21, q12, q22]]
 
     def sample_bilinear_interpolation(self, i, j, axis):
@@ -272,6 +268,7 @@ class fluidGrid:
             based on the 4 given x-velocites and y-velocities respectively that
             most closely surround the (x,y) coordinate. See notes for formula.
         """
+        # Assign variables ready for bilinear interpolation calculations
         nearest_indicies = self.find_four_nearest_velocity_indicies(i, j, axis)
         x_1 = nearest_indicies[0][0]
         x_2 = nearest_indicies[0][1]
@@ -286,6 +283,9 @@ class fluidGrid:
         x = i / CONFIG.CELL_DIVISIONS
         y = j / CONFIG.CELL_DIVISIONS
 
+        # This takes the sub-velocity position (relative to the cells). Rounds
+        # up and down to find the boundary indicies for the 4 surrounding
+        # velocities.
         min_x = int(x // 1)
         max_x = int(-(-x // 1))
         min_y = int(y // 1)
@@ -294,11 +294,19 @@ class fluidGrid:
             max_x += 1
         if max_y == min_y:
             max_y += 1
-        print(min_x, min_y)
 
+        # This sets any interpolated velocities within a solid cell to 0.0
         if self.solid_cell_map[min_x][min_y] == True:
             axis_velocity = 0.0
 
+        ##### NEED CONDITIONS FOR  EDGE AND CORNER CASES!!
+        #####
+        #####
+        #####
+        #####
+        #####
+                
+        # This excludes calculations for edges and corners
         elif x != x_1 and x != x_2 and y != y_1 and y != y_2:
             interpolation_T = ((x_2 - x) / (x_2 - x_1) * q11) + ((x - x_1) / (x_2 - x_1) * q21)
             interpolation_B = ((x_2 - x) / (x_2 - x_1) * q12) + ((x - x_1) / (x_2 - x_1) * q22)
@@ -306,13 +314,18 @@ class fluidGrid:
             bilinear_iterpolation = ((y_2 - y) / (y_2 - y_1) * interpolation_T) + ((y - y_1) / (y_2 - y_1) * interpolation_B)
 
             axis_velocity = bilinear_iterpolation # Redundant but helps with clarity
-        
+
+        # Temporary placeholder - sets any uncalculated sub-velocities = 0.0
         else:
             axis_velocity = 0.0
+        
         return axis_velocity
     
     def get_velocity_at_any_position(self, i, j):
-        """  """
+        """ Takes the index of a sub-position you want to calculate its
+        velocity and returns that velocity as a list [v_x, vy] """
+        # Only find a sub-velocity if the position in question is within the
+        # range of the velocity cells.
         if i < 0.5 * CONFIG.CELL_DIVISIONS or i >= CONFIG.CELL_COUNT_X * CONFIG.CELL_DIVISIONS - (0.5 * CONFIG.CELL_DIVISIONS) or j < 0.5 * CONFIG.CELL_DIVISIONS or j >= CONFIG.CELL_COUNT_Y * CONFIG.CELL_DIVISIONS - (0.5 * CONFIG.CELL_DIVISIONS):
             velocity = [0.0, 0.0]
         else:
@@ -325,7 +338,7 @@ class fluidGrid:
         """ i and j are the indicies of the interpolated velocites array """
         for i, row in enumerate(self.interpolated_velocities):
             for j, element in enumerate(row):
-                self.interpolated_velocities[i][j] = self.get_velocity_at_any_position(i, j)
+                self.interpolated_velocities[i][j] = self.get_velocity_at_any_position(i, j)        
 
 
 # ==============================================================================
@@ -354,18 +367,8 @@ class Simulation:
         self.state.randomize_velocities(self.state.velocities_y)
 
         self.state.initialize_solid_cells()
-        print(self.state.solid_cell_map)
 
         self.state.initiate_interpolated_velocities()
-
-        # TEST PRINTING
-        # ======================================================================
-        # print("x-velocities")
-        # print(self.state.velocities_x)
-        # print("\ny-velocities")
-        # print(self.state.velocities_y)
-        # print("\ndivergence")
-        # print(self.state.cell_divergence)
 
     # EVENT HANDLERS
     # ==========================================================================
@@ -386,11 +389,12 @@ class Simulation:
             1. Cell divergence
             2. Cell divergence color
             3. Pressures
-            4. Velocities 
+            4. Velocities
+            5. Interpolated velocities 
         """
         self.state.update_cell_divergence()
         self.state.update_cell_devergence_color()
-        self.state.update_pressures(1) # Higher number --> more accurate. Should be greater than 10. Use 1 for testing
+        self.state.update_pressures(1) # Higher number --> more accurate. Should be greater than 10. Use 1 for slow testing
         self.state.update_velocities()
         self.state.update_interpolated_velocities()
 
